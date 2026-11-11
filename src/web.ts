@@ -60,7 +60,7 @@ export function homePage(o: { keys: Key[]; grants: Grant[]; projects: Proj[]; lo
     <button data-action="delete-key" data-id="${esc(k.id)}" ${o.keys.length <= 1 ? "disabled" : ""}>Remove</button></td></tr>`).join("");
   const grants = o.grants.length ? o.grants.map((g) => `<tr><td><b>${esc(g.client_name)}</b><br><span class="muted">connected ${day(g.created_at)} · last used ${day(g.last_used_at)}</span></td>
     <td class="r"><button data-action="delete-grant" data-id="${esc(g.id)}">Disconnect</button></td></tr>`).join("") : `<tr><td class="muted">No MCP clients connected.</td></tr>`;
-  const projects = o.projects.length ? o.projects.map((p) => `<tr><td><b>${esc(p.name)}</b><br><span class="muted">${p.counts.faction} factions · ${p.counts.character} characters · ${p.counts.pit} PITs · ${p.counts.plot} plots</span></td>
+  const projects = o.projects.length ? o.projects.map((p) => `<tr><td><b>${esc(p.name)}</b><br><span class="muted">${p.counts.faction} factions · ${p.counts.character} characters · ${p.counts.lore} lore · ${p.counts.pit} PITs · ${p.counts.plot} plots</span></td>
     <td class="r"><a class="btn" href="/export/${esc(p.id)}.csv">Export CSV</a></td></tr>`).join("") : `<tr><td class="muted">No projects yet. Create one through MCP.</td></tr>`;
   const lock = o.lock.locked ? `Locked by <b>${esc(o.lock.held_by)}</b> since ${esc(o.lock.since)}, idle timeout in ${esc(o.lock.expires_in_sec)} s.
     <button data-action="release-lock">Force release</button>` : `<span class="muted">Free.</span>`;

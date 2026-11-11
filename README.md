@@ -11,10 +11,11 @@ canonball is a single-user MCP server for storybuilders. Agents such as Claude r
 | **Project** | Container for one universe. Everything lives in a project. | name, description |
 | **Faction** | A nation, political party, or any non-human interest group | uuid, name, abbreviations[], predecessor?, successor?, description |
 | **Character** | A human, or functionally human | uuid, name, other_names[], date_of_birth, description |
-| **PIT** (point in time) | A god's-eye snapshot: what everyone/everything is doing, and where. Exhaustive or partial. | uuid, title, at (in-world time), sort_key, exhaustive, entries[{subject_type, subject_id, activity, location?}], description |
+| **Lore** | The setting's standards, definitions, pseudosciences, theories, technologies, laws, customs… | uuid, name, category, aliases[], tags[], related_ids[] (any entity in the project), description |
+| **PIT** (point in time) | A god's-eye snapshot: what everyone/everything is doing, and where. Exhaustive or partial. Entries can cover characters, factions and lore (e.g. a theory's status at that moment). | uuid, title, at (in-world time), sort_key, exhaustive, entries[{subject_type, subject_id, activity, location?}], description |
 | **Plot** | An ordered list of PITs plus metadata | uuid, name, metadata{}, beats[{pit_id, note?}], description |
 
-`date_of_birth` and `at` are free text, so you can use any in-world calendar. `sort_key` orders PITs; by default each new PIT goes after the last one.
+`category` is free text (`list_lore` can filter by it). `date_of_birth` and `at` are free text too, so you can use any in-world calendar. `sort_key` orders PITs; by default each new PIT goes after the last one.
 
 ## History
 
@@ -33,8 +34,8 @@ One agent at a time. The first MCP session to call a tool takes the lock. Until 
 `export_csv` (MCP), or **Export CSV** in the web UI (`/export/<project>.csv`), produces one table:
 
 - Columns: `type, id, name, details`, then one column per PIT in chronological order.
-- The first row describes each PIT. After it comes one row per faction, character and plot.
-- A subject's cell is its activity at that PIT, plus `@ location`. A plot's cell is `beat N: note`.
+- The first row describes each PIT. After it comes one row per faction, character, lore entry (grouped by category) and plot.
+- A subject's cell (faction, character or lore) is its activity or status at that PIT, plus `@ location`. A plot's cell is `beat N: note`.
 
 All text is inlined and quoted per RFC 4180, with a UTF-8 BOM, so Excel and Google Sheets import the file as is and an agent can write a story from it.
 

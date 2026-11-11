@@ -12,9 +12,9 @@ const fail = (msg: string): Out => ({ content: [{ type: "text", text: msg }], is
 
 const uuid = z.string().uuid();
 const entrySchema = z.object({
-  subject_type: z.enum(["character", "faction"]),
+  subject_type: z.enum(["character", "faction", "lore"]),
   subject_id: uuid,
-  activity: z.string().describe("What the subject is doing / its state at this moment"),
+  activity: z.string().describe("What the subject is doing / its state at this moment (for lore: its status, e.g. 'newly proposed', 'discredited')"),
   location: z.string().optional().describe("Where the subject is"),
 });
 const beatSchema = z.object({ pit_id: uuid, note: z.string().optional().describe("What this PIT means for the plot") });
@@ -37,6 +37,14 @@ const FIELDS = {
     date_of_birth: z.string().min(1).describe("Free text, in the setting's own calendar if it has one; 'unknown' is allowed"),
     description: z.string().optional().describe("Markdown"),
   },
+  lore: {
+    name: z.string().min(1),
+    category: z.string().min(1).describe("Free text; e.g. standard, definition, pseudoscience, theory, technology, law, religion, custom, language, unit"),
+    aliases: z.array(z.string()).optional(),
+    tags: z.array(z.string()).optional(),
+    related_ids: z.array(uuid).optional().describe("Ids of related factions, characters, lore, PITs or plots in the same project"),
+    description: z.string().optional().describe("Markdown: the full text of the definition, standard or theory"),
+  },
   pit: {
     title: z.string().min(1),
     at: z.string().min(1).describe("In-world time label, e.g. '1453-05-29 dawn' or 'Year 3, winter'"),
@@ -54,7 +62,7 @@ const FIELDS = {
 } as const;
 
 const REQUIRED: Record<string, string[]> = {
-  project: ["name"], faction: ["name"], character: ["name", "date_of_birth"], pit: ["title", "at"], plot: ["name"],
+  project: ["name"], faction: ["name"], character: ["name", "date_of_birth"], lore: ["name", "category"], pit: ["title", "at"], plot: ["name"],
 };
 
 function partial<T extends Record<string, z.ZodTypeAny>>(shape: T) {
@@ -81,8 +89,8 @@ const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: fal
 const DESTROY = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
 
 export const INSTRUCTIONS = `canonball keeps the canon of fictional universes.
-Everything lives in a project. Factions (nations, parties, any non-human interest group) and characters (humans or functionally human) are the subjects. A PIT (point in time) is a god's-eye snapshot: one entry per subject saying what it is doing and where; it may be exhaustive or partial. A plot is an ordered list of PITs (beats) plus metadata.
-Every write is a git commit; use history/get_version/rollback_* to inspect or undo. export_csv gives the whole project as one table (subjects and plots as rows, PITs as columns).
+Everything lives in a project. Factions (nations, parties, any non-human interest group), characters (humans or functionally human) and lore (the setting's standards, definitions, pseudosciences, theories, technologies, laws, customs…) are the subjects. A PIT (point in time) is a god's-eye snapshot: one entry per subject saying what it is doing and where; it may be exhaustive or partial. A plot is an ordered list of PITs (beats) plus metadata.
+Every write is a git commit; use history/get_version/rollback_* to inspect or undo. export_csv gives the whole project as one table (factions, characters, lore and plots as rows, PITs as columns). Check lore before inventing terms or rules, and record new ones there.
 Only one agent may use canonball at a time. If a call returns "try again", wait the given seconds and retry; call release_lock when you are done so others needn't wait for the idle timeout.`;
 
 export function buildServer(sessionId: () => string, clientName: string): McpServer {
@@ -127,13 +135,20 @@ export function buildServer(sessionId: () => string, clientName: string): McpSer
   const kinds = [
     ["faction", "factions", "a faction (nation, political party, any non-human interest group)"],
     ["character", "characters", "a character (a human or functionally human being)"],
+    ["lore", "lore", "a lore entry (standard, definition, pseudoscience, theory, technology, law, custom, … of the setting)"],
     ["pit", "pits", "a PIT (point in time: god's-eye snapshot of what everyone/everything is doing and where)"],
     ["plot", "plots", "a plot (ordered list of PITs plus metadata)"],
   ] as const;
   for (const [kind, plural, what] of kinds) {
-    tool(`list_${plural}`, `List ${plural} in a project (compact; use get_${kind} for full text).${kind === "pit" ? " Sorted chronologically." : ""}`,
-      { project_id: uuid, query: z.string().optional().describe("Case-insensitive substring filter over all fields") }, READ,
-      ({ project_id, query }) => { store.mustGet("project", project_id); return store.list(kind, project_id, query).map(summary); });
+    tool(`list_${plural}`, `List ${plural} in a project (compact; use get_${kind} for full text).${kind === "pit" ? " Sorted chronologically." : ""}${kind === "lore" ? " Filter by category to see e.g. only theories." : ""}`,
+      { project_id: uuid, query: z.string().optional().describe("Case-insensitive substring filter over all fields"),
+        ...(kind === "lore" ? { category: z.string().optional().describe("Exact category, case-insensitive") } : {}) }, READ,
+      ({ project_id, query, category }) => {
+        store.mustGet("project", project_id);
+        let out = store.list(kind, project_id, query);
+        if (typeof category === "string" && category) out = out.filter((e) => String(e.category).toLowerCase() === category.toLowerCase());
+        return out.map(summary);
+      });
     tool(`get_${kind}`, `Get ${what} in full.`, { id: uuid }, READ, ({ id }) => store.mustGet(kind, id));
     tool(`create_${kind}`, `Create ${what}.`, { project_id: uuid, ...forCreate(kind) }, WRITE,
       ({ project_id, ...a }) => store.create(kind, project_id, a));
@@ -171,7 +186,7 @@ export function buildServer(sessionId: () => string, clientName: string): McpSer
     if (beats.length === (p.beats as PlotBeat[]).length) throw new UserError("that PIT is not a beat of this plot");
     return store.update("plot", plot_id, { beats });
   });
-  tool("timeline", "Chronological list of what a character or faction does across all PITs.", { subject_id: uuid }, READ,
+  tool("timeline", "Chronological list of what a character, faction or lore entry does / its status across all PITs.", { subject_id: uuid }, READ,
     ({ subject_id }) => store.timeline(subject_id));
 
   // ----- history -----

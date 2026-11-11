@@ -11,10 +11,11 @@ export function exportCsv(projectId: string): { filename: string; csv: string } 
   const project = mustGet("project", projectId);
   const factions = list("faction", projectId);
   const characters = list("character", projectId);
+  const lore = list("lore", projectId).sort((a, b) => String(a.category).localeCompare(String(b.category)) || String(a.name).localeCompare(String(b.name)));
   const plots = list("plot", projectId);
   const pits = list("pit", projectId);
   const names = new Map<string, string>();
-  for (const e of [...factions, ...characters, ...plots, ...pits]) names.set(e.id, String(e.name ?? e.title));
+  for (const e of [...factions, ...characters, ...lore, ...plots, ...pits]) names.set(e.id, String(e.name ?? e.title));
   const ref = (id: unknown) => (id ? `${names.get(String(id)) ?? "?"} [${id}]` : "");
 
   const header = ["type", "id", "name", "details", ...pits.map((p) => `${p.at} | ${p.title}${p.exhaustive ? " (exhaustive)" : ""} [${p.id}]`)];
@@ -42,6 +43,13 @@ export function exportCsv(projectId: string): { filename: string; csv: string } 
     (c.other_names as string[]).length ? `also known as: ${(c.other_names as string[]).join(", ")}` : "",
     `born: ${c.date_of_birth}`,
     String(c.description ?? ""),
+  ]);
+  for (const l of lore) subjectRow(l, [
+    `category: ${l.category}`,
+    (l.aliases as string[]).length ? `also known as: ${(l.aliases as string[]).join(", ")}` : "",
+    (l.tags as string[]).length ? `tags: ${(l.tags as string[]).join(", ")}` : "",
+    (l.related_ids as string[]).length ? `related: ${(l.related_ids as string[]).map(ref).join("; ")}` : "",
+    String(l.description ?? ""),
   ]);
   for (const pl of plots) {
     const meta = Object.entries(pl.metadata as Record<string, unknown>).map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`);

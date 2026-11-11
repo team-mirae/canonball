@@ -117,6 +117,17 @@ test("canon round trip, history, rollback, lock, export", async () => {
   await a.call("add_plot_beat", { plot_id: plot.id, pit_id: pit1.id, note: "hope" });
   await a.call("add_plot_beat", { plot_id: plot.id, pit_id: pit2.id, note: "despair" });
 
+  // lore: standards/definitions/theories, linkable to anything and trackable across PITs
+  const fire = await a.call("create_lore", { project_id: p.id, name: "Greek fire", category: "technology", aliases: ["sea fire"], tags: ["weapon"],
+    related_ids: [rome.id, c1.id], description: "Incendiary liquid; formula a state secret." });
+  const humor = await a.call("create_lore", { project_id: p.id, name: "Humorism", category: "pseudoscience", related_ids: [fire.id] });
+  await assert.rejects(a.call("create_lore", { project_id: p.id, name: "No category" }));
+  await assert.rejects(a.call("create_lore", { project_id: p.id, name: "Bad link", category: "theory", related_ids: [p.id] }), /related_ids/);
+  await a.call("set_pit_entry", { pit_id: pit1.id, subject_type: "lore", subject_id: fire.id, activity: "Stock nearly exhausted" });
+  assert.equal((await a.call("list_lore", { project_id: p.id, category: "Pseudoscience" })).length, 1);
+  assert.equal((await a.call("timeline", { subject_id: fire.id }))[0].activity, "Stock nearly exhausted");
+  await assert.rejects(a.call("delete_lore", { id: fire.id }), /referenced by: .*pit .*lore/);
+
   const tl = await a.call("timeline", { subject_id: c2.id });
   assert.equal(tl.length, 1);
   assert.equal(tl[0].pit.title, "The fall");
@@ -161,6 +172,12 @@ test("canon round trip, history, rollback, lock, export", async () => {
   assert.match(csv, /"plot","[^"]+","Last stand","pov: Constantine\nstatus: draft","beat 1: hope","beat 2: despair"/);
   assert.match(csv, /"faction","[^"]+","Ottoman Empire","abbreviations: OE\npredecessor: Eastern Roman Empire/);
   assert.equal((await fetch(`${BASE}/export/${p.id}.csv`, { redirect: "manual" })).status, 302);
+  assert.match(csv, /"lore","[^"]+","Greek fire","category: technology\nalso known as: sea fire\ntags: weapon\nrelated: Eastern Roman Empire \[[^\]]+\]; Constantine XI \[[^\]]+\]\nIncendiary liquid; formula a state secret.","Stock nearly exhausted",""/);
+  const det = await a.call("delete_lore", { id: fire.id, detach: true });
+  assert.equal(det.detached.length, 2);
+  assert.deepEqual((await a.call("get_lore", { id: humor.id })).related_ids, []);
+  await a.call("rollback_entity", { id: fire.id, commit: fire.commit_sha });
+  assert.equal((await a.call("get_lore", { id: fire.id })).category, "technology");
 
   // lock: a second agent is told to try again until the first releases or goes idle
   const b = await connect(tok.access_token);

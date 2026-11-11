@@ -5,12 +5,12 @@ import { randomUUID } from "node:crypto";
 import { db, tx } from "./db.js";
 import * as git from "./git.js";
 
-export type Kind = "project" | "faction" | "character" | "pit" | "plot";
-export const CHILD_KINDS = ["faction", "character", "pit", "plot"] as const;
+export type Kind = "project" | "faction" | "character" | "lore" | "pit" | "plot";
+export const CHILD_KINDS = ["faction", "character", "lore", "pit", "plot"] as const;
 export type ChildKind = (typeof CHILD_KINDS)[number];
 
 export type PitEntry = {
-  subject_type: "character" | "faction";
+  subject_type: "character" | "faction" | "lore";
   subject_id: string;
   activity: string;
   location?: string;
@@ -22,20 +22,21 @@ export type Entity = { kind: Kind; id: string; project_id: string; [k: string]: 
 export class UserError extends Error {}
 
 const TABLE: Record<Kind, string> = {
-  project: "projects", faction: "factions", character: "characters", pit: "pits", plot: "plots",
+  project: "projects", faction: "factions", character: "characters", lore: "lore", pit: "pits", plot: "plots",
 };
 /** Data fields (beyond id/project_id/timestamps/commit) stored per kind, in file order. */
 const FIELDS: Record<Kind, string[]> = {
   project: ["name", "description"],
   faction: ["name", "abbreviations", "predecessor_id", "successor_id", "description"],
   character: ["name", "other_names", "date_of_birth", "description"],
+  lore: ["name", "category", "aliases", "tags", "related_ids", "description"],
   pit: ["title", "at", "sort_key", "exhaustive", "entries", "description"],
   plot: ["name", "metadata", "beats", "description"],
 };
-const JSON_FIELDS = new Set(["abbreviations", "other_names", "entries", "metadata", "beats"]);
+const JSON_FIELDS = new Set(["abbreviations", "other_names", "entries", "metadata", "beats", "aliases", "tags", "related_ids"]);
 const DEFAULTS: Record<string, unknown> = {
   description: "", abbreviations: [], other_names: [], entries: [], metadata: {}, beats: [],
-  predecessor_id: null, successor_id: null, exhaustive: false,
+  predecessor_id: null, successor_id: null, exhaustive: false, aliases: [], tags: [], related_ids: [],
 };
 
 const now = () => new Date().toISOString();
@@ -166,7 +167,7 @@ function check(e: Entity) {
     const t = get(kind, id);
     need(t && t.project_id === e.project_id, `${what}: ${kind} ${id} not found in this project`);
   };
-  if (e.kind === "project" || e.kind === "faction" || e.kind === "character" || e.kind === "plot")
+  if (e.kind === "project" || e.kind === "faction" || e.kind === "character" || e.kind === "plot" || e.kind === "lore")
     need(typeof e.name === "string" && e.name.trim(), "name is required");
   if (e.kind === "faction") {
     if (e.predecessor_id) { need(e.predecessor_id !== e.id, "a faction can't precede itself"); inProject("faction", String(e.predecessor_id), "predecessor_id"); }
@@ -185,6 +186,14 @@ function check(e: Entity) {
     }
   }
   if (e.kind === "plot") for (const b of e.beats as PlotBeat[]) inProject("pit", b.pit_id, "beats");
+  if (e.kind === "lore") {
+    need(typeof e.category === "string" && e.category.trim(), "category is required (e.g. standard, definition, pseudoscience, theory)");
+    for (const r of e.related_ids as string[]) {
+      need(r !== e.id, "a lore entry can't relate to itself");
+      const t = find(r);
+      need(t && t.kind !== "project" && t.project_id === e.project_id, `related_ids: ${r} not found in this project`);
+    }
+  }
 }
 
 function nextSortKey(projectId: string): number {
@@ -226,40 +235,46 @@ export function update(kind: Kind, id: string, patch: Record<string, unknown>): 
   return e;
 }
 
-/** Ids of other entities in the project that reference this one. */
-export function referencesTo(e: Entity): string[] {
+/**
+ * Everything in the project that points at `e`, and those entities with the pointer removed.
+ * Pointers: faction predecessor/successor, PIT entry subjects, plot beats, lore related_ids.
+ */
+function detachPlan(e: Entity): { refs: string[]; touched: Entity[] } {
   const refs: string[] = [];
-  if (e.kind === "faction") for (const f of list("faction", e.project_id))
-    if (f.predecessor_id === e.id || f.successor_id === e.id) refs.push(`faction ${f.id} (${f.name})`);
-  if (e.kind === "faction" || e.kind === "character") for (const p of list("pit", e.project_id))
-    if ((p.entries as PitEntry[]).some((x) => x.subject_id === e.id)) refs.push(`pit ${p.id} (${p.title})`);
-  if (e.kind === "pit") for (const p of list("plot", e.project_id))
-    if ((p.beats as PlotBeat[]).some((b) => b.pit_id === e.id)) refs.push(`plot ${p.id} (${p.name})`);
-  return refs;
+  const touched: Entity[] = [];
+  const t = now();
+  const id = e.id;
+  if (e.kind === "faction") for (const f of list("faction", e.project_id)) {
+    if (f.id !== id && (f.predecessor_id === id || f.successor_id === id)) {
+      refs.push(`faction ${f.id} (${f.name})`);
+      touched.push({ ...f, predecessor_id: f.predecessor_id === id ? null : f.predecessor_id, successor_id: f.successor_id === id ? null : f.successor_id, updated_at: t });
+    }
+  }
+  if (e.kind === "faction" || e.kind === "character" || e.kind === "lore") for (const p of list("pit", e.project_id)) {
+    const entries = (p.entries as PitEntry[]).filter((x) => x.subject_id !== id);
+    if (entries.length !== (p.entries as PitEntry[]).length) { refs.push(`pit ${p.id} (${p.title})`); touched.push({ ...p, entries, updated_at: t }); }
+  }
+  if (e.kind === "pit") for (const p of list("plot", e.project_id)) {
+    const beats = (p.beats as PlotBeat[]).filter((b) => b.pit_id !== id);
+    if (beats.length !== (p.beats as PlotBeat[]).length) { refs.push(`plot ${p.id} (${p.name})`); touched.push({ ...p, beats, updated_at: t }); }
+  }
+  for (const l of list("lore", e.project_id)) {
+    if (l.id === id) continue;
+    const related = (l.related_ids as string[]).filter((r) => r !== id);
+    if (related.length !== (l.related_ids as string[]).length) { refs.push(`lore ${l.id} (${l.name})`); touched.push({ ...l, related_ids: related, updated_at: t }); }
+  }
+  return { refs, touched };
 }
+
+/** Descriptions of other entities in the project that reference this one. */
+export function referencesTo(e: Entity): string[] { return detachPlan(e).refs; }
 
 export function remove(kind: Kind, id: string, opts: { detach?: boolean } = {}): { commit_sha: string; detached: string[] } {
   const e = mustGet(kind, id);
-  const refs = kind === "project" ? [] : referencesTo(e);
+  const { refs, touched } = kind === "project" ? { refs: [], touched: [] } : detachPlan(e);
   if (refs.length && !opts.detach)
     throw new UserError(`${kind} ${id} is referenced by: ${refs.join("; ")}. Pass detach=true to remove those references in the same commit.`);
   const pid = e.project_id;
-  const touched: Entity[] = [];
-  if (refs.length) {
-    const t = now();
-    if (kind === "faction") for (const f of list("faction", pid)) {
-      if (f.predecessor_id === id || f.successor_id === id)
-        touched.push({ ...f, predecessor_id: f.predecessor_id === id ? null : f.predecessor_id, successor_id: f.successor_id === id ? null : f.successor_id, updated_at: t });
-    }
-    if (kind === "faction" || kind === "character") for (const p of list("pit", pid)) {
-      const entries = (p.entries as PitEntry[]).filter((x) => x.subject_id !== id);
-      if (entries.length !== (p.entries as PitEntry[]).length) touched.push({ ...p, entries, updated_at: t });
-    }
-    if (kind === "pit") for (const p of list("plot", pid)) {
-      const beats = (p.beats as PlotBeat[]).filter((b) => b.pit_id !== id);
-      if (beats.length !== (p.beats as PlotBeat[]).length) touched.push({ ...p, beats, updated_at: t });
-    }
-  }
   const rel = kind === "project" ? `projects/${pid}` : filePath(kind, pid, id);
   const paths = [rel, ...touched.map((t) => filePath(t.kind, pid, t.id))];
   const msg = `delete ${kind} ${label(e)} (${id})`;
@@ -366,7 +381,7 @@ export function rollbackProject(projectId: string, commitRef: string): { commit_
 
 export function timeline(subjectId: string): { pit: { id: string; title: string; at: string; sort_key: number }; activity: string; location?: string }[] {
   const s = find(subjectId);
-  if (!s || (s.kind !== "character" && s.kind !== "faction")) throw new UserError(`${subjectId} is not a character or faction`);
+  if (!s || (s.kind !== "character" && s.kind !== "faction" && s.kind !== "lore")) throw new UserError(`${subjectId} is not a character, faction or lore entry`);
   const out = [];
   for (const p of list("pit", s.project_id)) {
     const en = (p.entries as PitEntry[]).find((x) => x.subject_id === subjectId);

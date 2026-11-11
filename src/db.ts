@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS characters (
   description TEXT NOT NULL DEFAULT '',
   commit_sha TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS lore (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, category TEXT NOT NULL, aliases TEXT NOT NULL DEFAULT '[]', tags TEXT NOT NULL DEFAULT '[]',
+  related_ids TEXT NOT NULL DEFAULT '[]', description TEXT NOT NULL DEFAULT '',
+  commit_sha TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS pits (
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL, at TEXT NOT NULL, sort_key REAL NOT NULL, exhaustive INTEGER NOT NULL DEFAULT 0,
