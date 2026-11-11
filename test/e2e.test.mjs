@@ -63,7 +63,7 @@ async function oauthToken() {
   const page = await (await fetch(`${BASE}/oauth/authorize?${q}`, { headers: { cookie } })).text();
   assert.match(page, /Test Client/);
   const pending = /name="pending" value="([^"]+)"/.exec(page)[1];
-  const r = await fetch(`${BASE}/oauth/authorize`, { method: "POST", redirect: "manual", headers: { cookie, "Content-Type": "application/x-www-form-urlencoded", Origin: BASE },
+  const r = await fetch(`${BASE}/oauth/authorize`, { method: "POST", redirect: "manual", headers: { cookie, "Content-Type": "application/x-www-form-urlencoded", Origin: "null", "Sec-Fetch-Site": "same-origin" },
     body: new URLSearchParams({ pending, decision: "allow" }) });
   assert.equal(r.status, 303);
   const loc = new URL(r.headers.get("location"));

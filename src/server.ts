@@ -59,12 +59,20 @@ function cookie(req: Request, name: string): string | undefined {
 function setCookie(res: Response, name: string, value: string, maxAge: number) {
   res.append("Set-Cookie", `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${SECURE ? "; Secure" : ""}`);
 }
+/** Same-origin browser request: Origin matches, or (when a browser nulls Origin) Sec-Fetch-Site says so. */
+function sameOrigin(req: Request): boolean {
+  const origin = req.headers.origin;
+  if (origin === PUBLIC_URL) return true;
+  if (origin && origin !== "null") return false;
+  const site = req.headers["sec-fetch-site"];
+  return site === undefined ? !origin : site === "same-origin";
+}
 const signedIn = (req: Request) => auth.validWebSession(cookie(req, auth.SESSION_COOKIE));
 
 app.use((req, res, next) => {
   res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self' https:; frame-ancestors 'none'; base-uri 'none'");
   res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Referrer-Policy", "same-origin"); // no-referrer makes browsers send Origin: null on form POSTs
   next();
 });
 
@@ -74,8 +82,7 @@ app.get("/static/app.js", (_req, res) => { res.type("application/javascript").se
 // ---------- JSON API for the browser (CSRF: JSON content type + same-origin check + SameSite cookies) ----------
 const json = express.json({ limit: "64kb" });
 function browserPost(req: Request, res: Response, next: NextFunction) {
-  const origin = req.headers.origin;
-  if (!req.is("application/json") || (origin && origin !== PUBLIC_URL)) { res.status(403).json({ error: "bad request origin" }); return; }
+  if (!req.is("application/json") || !sameOrigin(req)) { res.status(403).json({ error: "bad request origin" }); return; }
   if (auth.limited(`web:${clientIp(req)}`, 60, 60_000)) { res.status(429).json({ error: "too many requests" }); return; }
   next();
 }
@@ -160,8 +167,8 @@ app.get("/oauth/authorize", async (req, res) => {
   res.type("html").send(web.consentPage({ pendingId: auth.holdPending(r), clientName: r.clientName, clientHost: r.clientHost }));
 });
 app.post("/oauth/authorize", express.urlencoded({ extended: false, limit: "8kb" }), (req, res) => {
-  const origin = req.headers.origin;
-  if ((origin && origin !== PUBLIC_URL) || !signedIn(req)) { res.status(403).type("html").send(web.errorPage("sign in first")); return; }
+  if (!sameOrigin(req)) { res.status(403).type("html").send(web.errorPage("cross-site request refused")); return; }
+  if (!signedIn(req)) { res.status(403).type("html").send(web.errorPage("sign in first")); return; }
   const r = auth.takePending(String(req.body?.pending ?? ""));
   if (!r) { res.status(400).type("html").send(web.errorPage("this request expired; start the connection again from the client")); return; }
   res.redirect(303, req.body?.decision === "allow" ? auth.approve(r) : auth.deny(r));
