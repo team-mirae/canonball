@@ -1,0 +1,40 @@
+# canonball on public.sjun.me. Nothing here publishes a host port. The only way in is magic-gate's
+# edge (edge/sites/apps.caddy in the magic-gate repo) over the bridge magic-gate_canonball, which only
+# edge shares: https://canonball.sjun.me → app :8080 (UI, OAuth, /mcp, /export). Edge terminates TLS
+# and sets X-Forwarded-For (the bootstrap IP check relies on it). Outbound (claude.ai's OAuth client
+# metadata document) leaves through Docker's NAT on the default network.
+services:
+  app:
+    build: ..
+    image: canonball:local
+    environment:
+      CANONBALL_PUBLIC_URL: https://canonball.sjun.me
+      CANONBALL_BOOTSTRAP_IPS: ${CANONBALL_BOOTSTRAP_IPS:?CANONBALL_BOOTSTRAP_IPS missing from prod.env}
+      CANONBALL_LOCK_TTL_SEC: ${CANONBALL_LOCK_TTL_SEC:-30}
+      CANONBALL_DEPLOYED_COMMIT: ${DEPLOYED_COMMIT:-dev}
+    volumes:
+      - app-data:/data
+    tmpfs:
+      - /tmp
+    networks:
+      edge:
+        aliases: [canonball-app]
+      default: {} # egress; magic-gate_canonball is internal
+    dns_search: .
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 384m
+    restart: unless-stopped
+    stop_grace_period: 15s
+    logging: { driver: json-file, options: { max-size: 10m, max-file: "3" } }
+
+networks:
+  # Created by magic-gate (compose.yaml `canonball`, 172.31.243.0/24, internal); deploy magic-gate first.
+  edge:
+    name: magic-gate_canonball
+    external: true
+
+volumes:
+  # SQLite database + the git repo of markdown files. Back this up.
+  app-data:

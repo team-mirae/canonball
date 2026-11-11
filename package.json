@@ -1,0 +1,28 @@
+{
+  "name": "canonball",
+  "version": "1.0.0",
+  "description": "Self-hosted MCP canon keeper for storybuilders",
+  "scripts": {
+    "test": "node build.mjs && node --test test/",
+    "build": "node build.mjs",
+    "typecheck": "tsc -p .",
+    "start": "node dist/canonball.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.1.0",
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}
